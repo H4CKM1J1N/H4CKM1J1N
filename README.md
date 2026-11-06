@@ -16,14 +16,7 @@ Soy Ingeniero de Sistemas especializado en seguridad ofensiva, gestión de vulne
 - **Arquitectura & Auditoría:** ISO 27001:2022 Internal Auditor | CODSP | FCP (Fortinet) | KATA (Kaspersky)
 
 ### 💻 Últimas Investigaciones y Writeups
-Aquí documento mis metodologías de intrusión y *bypass* en entornos de laboratorio (DockerLabs, TheHackerLabs, etc.):
-
-1. [**Apadrina un Pingüino (Spring Boot / Java)**](./Writeups/DockerLabs/Apadrina_un_Pinguino/Apadrina_un_Pinguino.md)
-   *Fuga de secretos vía heapdump, falsificación de JWT y RCE mediante Insecure Deserialization (CommonsCollections6).*
-2. [**SecureLab (Flask / Apache)**](./Writeups/DockerLabs/SecureLab/README.md)
-   *Bypass de WAF, inyección de comandos en API oculta y escalada a root abusando de un binario `find` con backdoor.*
-3. [**Asturias Viajes (Node.js / Express)**](./Writeups/Entornos_Aislados/Asturias_Viajes/README.md)
-   *Secuestro de sesiones, extracción de secretos vía backup expuesto y RCE a través de subida de archivos arbitraria con `require()`.*
+Aquí documento mis metodologías de intrusión y *bypass* en entornos de laboratorio (DockerLabs, TheHackerLabs, etc.)
 
 ### 🛠️ Herramientas y Lenguajes
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
