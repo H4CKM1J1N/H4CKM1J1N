@@ -1,4 +1,4 @@
-# 🎯 Los 3 Hackers — Writeup 
+# 🎯 Los 3 Hackers — Writeup (172.17.0.3)
 
 > **Máquina:** Los 3 Hackers · **IP:** `172.17.0.3` · **Dificultad:** Fácil–Media
 > **SO:** Linux (contenedor Ubuntu) · **Servicios:** SSH (22) y HTTP/Gunicorn (80)
