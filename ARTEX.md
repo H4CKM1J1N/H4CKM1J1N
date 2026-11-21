@@ -32,7 +32,7 @@ El ecosistema se desplegó en una red Docker aislada (`artlab-net`), permitiendo
 ### Conocimiento Inyectado (Skills)
 Se cargaron módulos avanzados de la comunidad (ej. `api-security`, `llm-security`, `firmware-pentest`, `cloud-k8s`) que inyectan metodologías estandarizadas (PTES, OWASP, FSTM) directamente en el prompt de los agentes, evitando alucinaciones.
 
-![Configuración del Goal Decomposer con DeepSeek](assets/Screenshot_1.png)
+![Configuración del Goal Decomposer con DeepSeek](assets/Screenshot_2.png)
 *Fig 1. Configuración del motor DeepSeek V4 Pro como LLM global para la descomposición de objetivos.*
 
 ---
@@ -54,7 +54,7 @@ La IA demostró una capacidad de adaptación asombrosa, encadenando herramientas
 ### 1. Reconocimiento y Superficie de Ataque
 El agente lanzó un escaneo inicial con `nmap`. Al recibir un bloqueo ICMP (ping), en lugar de fallar, **razonó** y aplicó el flag `-Pn` (tratando el host como activo). Descubrió el puerto `22` (SSH) y el `12345` (una API en Python/Werkzeug).
 
-![Asset Coverage de ARTEX](assets/Screenshot_2.png)
+![Asset Coverage de ARTEX](assets/Screenshot_3.png)
 *Fig 2. Mapeo automático de la superficie de ataque y cobertura de pruebas.*
 
 ### 2. Enumeración y Descubrimiento de Vulnerabilidades
@@ -68,7 +68,7 @@ Al inspeccionar la API, la IA notó una respuesta JSON con el mensaje `{"message
 *   **Hallazgo 3:** Encontró un depurador de Werkzeug expuesto.
 *   **Hallazgo 4 & 5:** Encontró credenciales débiles de SSH (`steven:steven`). Ya dentro del sistema, ejecutó `sudo -l` y descubrió una mala configuración: `sudo unzip`. La IA explotó esto de forma autónoma para escalar privilegios hasta obtener **`root`** (`uid=0`), demostrando el impacto con comandos mínimos y no destructivos (`id`, `whoami`).
 
-![Resumen del Planner de ARTEX](assets/Screenshot_3.png)
+![Resumen del Planner de ARTEX](assets/Screenshot_1.png)
 *Fig 3. Resumen final generado por el agente Planner detallando la cadena de ataque y la escalada a root.*
 
 ---
@@ -79,7 +79,7 @@ Una de las características más fascinantes de ARTEX es su UI. El **Exploration
 
 Cada nodo representa un comando ejecutado, una inferencia lógica o una vulnerabilidad confirmada. Al hacer clic en cada nodo, el operador humano puede auditar exactamente qué comando se lanzó, cuál fue la salida de la terminal y cómo la IA conectó ese hallazgo con el siguiente paso. Esta característica es invaluable para la fase de reporte y para replicar la prueba manualmente.
 
-![Exploration Graph de ARTEX](assets/img4_exploration_graph.png)
+![Exploration Graph de ARTEX](assets/Screenshot_4.png)
 *Fig 4. Grafo de exploración que mapea la máquina de estados de la IA durante toda la campaña.*
 
 ---
